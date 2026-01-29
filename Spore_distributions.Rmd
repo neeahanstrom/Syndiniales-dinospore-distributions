@@ -1,0 +1,1091 @@
+---
+title: "Environmental gradients and host availability shape the distribution of dinosporetic Syndiniales in the Baltic Sea–Skagerrak ecosystems"
+output: html_document
+date: "2026-01-28"
+Author: Neea Hanström
+---
+# Download and filter data
+- Here we will download the sequence read data in a phyloseq format and filter out the zooplankton taxa we want to include in the analysis
+
+```{r}
+setwd("/Users/neea/Documents/Project SPORES/CreatePhyloseq/")   
+rm(list = ls())
+
+#load the libraries
+library(phyloseq)
+library(tidyverse)
+# Import the dataset
+ps_spores <- readRDS("./ps_DinoSpores.rds")
+
+otu_table(ps_spores)                                                           
+                                   
+sample_data(ps_spores)$Project_ID%>%unique()       #Chech you have only this project and nothing else in the imported phyloseq object                            
+           
+tax_table(ps_spores)      
+
+testi <- subset_samples(ps_spores,
+                           Sorted_genus %in% c("Acartia",                       # <- keep only those taxa
+                                               "Temora",
+                                               "Centropages",
+                                               "Pseudocalanus",
+                                               "Eurytemora",
+                                               "Calanus",
+                                               "Water"))                         
+
+# Check the read counts in the samples
+sample_reads <- sample_sums(testi) ##### The total reads in all samples used in this project
+
+total_reads <- sum(sample_reads) ##### This sums up all the reads
+
+print(total_reads)
+          
+
+```
+# Fig. S2: Rarefaction curves
+
+- Remove the crustacean reads from the phyloseq object and get the read counts of the taxa included in this study
+- Plot the rarefaction curves
+
+```{r}
+keep <- ps_spores %>%                                                        
+  subset_taxa(Order != "Crustacea") # <- removes the crustacean reads
+
+
+# Remove samples with read count less than 100. 
+filtered_relative <- prune_samples(sample_sums(keep) >= 100, keep)
+
+# rares is to create the rarefaction curves
+rares <- subset_samples(filtered_relative,
+                        Sorted_genus %in% c(NA, "Centropages", "Pseudocalanus", "Calanus") | # <- 
+                          is.na(Sorted_genus))
+
+# After this the filtered_relative phyloseq object has only Calanus, Centropages, Pseudocalanus and Water samples
+filtered_relative <- rares
+
+
+#Rarefaction curves
+
+library(devtools)
+
+devtools::install_github("gauravsk/ranacapa")
+
+library(ranacapa); packageVersion("ranacapa")                         # v. 0.1.0
+ggrare(physeq_object = filtered_relative, # <—— your phyloseq object
+       parallel = TRUE,
+       step = 100,
+       color = "Sorted_genus") + # Might be SORTED_genus or similar
+  facet_wrap(~Sorted_genus, scales = "free")+
+theme_minimal()
+
+
+sample_data_df <- as.data.frame(sample_data(filtered_relative))
+
+
+```
+# Get the reads of Syndiniales in the water and in the host samples
+- Only the Syndiniales reads per sample type
+```{r}
+physeq_subset <- subset_taxa(filtered_relative, Class == "Syndiniales") ### You can change the taxonomic level and the name of the taxa of interest accordingly here
+
+# Put it into a data frame
+sample_data_df <- as.data.frame(sample_data(physeq_subset))
+
+#Extract the OTU/ASV table for the subsetted taxon
+otu_table_df <- as.data.frame(otu_table(physeq_subset))
+
+#Calculate the total reads per sample for the subsetted taxon
+sample_reads <- sample_sums(physeq_subset)
+
+# Combine sample metadata and sample read counts
+sample_data_df$Total_Reads <- sample_reads
+
+# Summarize the total reads by SampleType using dplyr
+library(dplyr)
+reads_by_sample_type <- sample_data_df %>%
+  group_by(Sample_type) %>%
+  summarise(Total_Reads = sum(Total_Reads))
+
+####Print the total reads of SYNDINIALES in water and in the hosts
+print(reads_by_sample_type)
+```
+# Use the df we create here to merge the abiotic and botic tables together in one data frame
+```{r}
+relative <- filtered_relative %>%                                               # <- %>%  tidyverse package (call for package if needed)
+                                         
+  transform_sample_counts(function(x) x / sum(x))                              
+
+rel_100<- prune_samples(sample_sums(relative) == 1, relative)                   # <- Here I filter out the samples that don't have any data, and keep only the ones with data (just in case)
+
+df <- rel_100 %>%
+  psmelt()
+
+dfwater <- df %>%
+  filter(Sample_type == "Water") # <- Only water samples
+
+# Check the number of individual samples
+num_unique_samples <- length(unique(dfwater$Sample)) #Change here if it is the water or all the samples you want to see
+print(num_unique_samples)
+```
+# Remove the large objects we no longer need from the environment
+```{r}
+rm(ps_spores)
+rm(keep)
+rm(rel_100)
+rm(relative)
+rm(testi)
+rm(physeq_subset)
+rm(rares)
+
+```
+
+# Import environmental parameters "Abiotic_spore" data. The data is retrieved from the SHARK web database
+- The averages that are calculated here will be used for the depth strata specific analysis
+
+```{r}
+# Import the data from the excel called Abiotic_spore
+
+# Changing the names of the columns
+sorting <- Abiotic_spore %>% rename(Salinity = "Salinity CTD (o/oo psu)")
+sorting <- sorting %>% rename(Temperature = "Temperature CTD (C)")
+sorting <- sorting %>% rename(Chlorophyll.a = "Chlorophyll-a bottle (ug/l)")
+sorting <- sorting %>% rename(Oxygen ="Dissolved oxygen O2 CTD (ml/l)")
+sorting <- sorting %>% rename(Depth = "Sampling depth (m)")
+sorting <- sorting %>% rename(Station_ID = "Station name")
+sorting <- sorting %>% rename(Nitrate = "Nitrate NO3-N (umol/l)")
+sorting <- sorting %>% rename(Phosphate = "Phosphate PO4-P (umol/l)")
+
+
+# Select only columns we want to work with
+abiotic <- sorting %>% 
+  select("Salinity", "Oxygen",  "Temperature", "Chlorophyll.a", "Station_ID", "Depth", "Nitrate", "Phosphate")
+
+library(dplyr) # <-  call if needed
+
+# Process the data: determine the sample stratum
+df_summary <- abiotic %>%
+  filter(Depth <= 90) %>%  # Remove samples deeper than 90m
+  mutate(sample._strata = case_when(
+    Depth >= 0 & Depth < 30 ~ "Surface",
+    Depth >= 30 & Depth < 60 ~ "Medium",
+    Depth >= 60 & Depth <= 90 ~ "Deep"
+  ))
+
+  # This will calculate the averages for all the parameters by the depth strata
+  df_average <- df_summary %>%
+    group_by(Station_ID, sample._strata) %>%
+  summarise(
+    Avg_Salinity = mean(Salinity, na.rm = TRUE),
+    Avg_Oxygen = mean(Oxygen, na.rm = TRUE),
+    Avg_Temperature = mean(Temperature, na.rm = TRUE),
+    Avg_Chlorophyll = mean(Chlorophyll.a, na.rm = TRUE),
+    Avg_Nitrate = mean(Nitrate, na.rm =TRUE),
+    Avg_Phosphate = mean(Phosphate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# View the summarized data
+print(df_average)
+
+# Adding the Station_ID column to the data
+df_summary <- df_average %>% 
+  
+  mutate(Station_ID = ifelse(Station_ID  == "BY5 BORNHOLMSDJ", "BY5",                        #Changing the location names to match the biotic dataset   
+                                    ifelse(Station_ID == "BY15 GOTLANDSDJ","BY15",
+                                           ifelse(Station_ID == "BY31 LANDSORTSDJ", "BY31",
+                                                         ifelse(Station_ID == "≈17", "A17",
+                                                                "Other")))))
+
+# merge the abiotic (df_summary) with the sequencing dataframe (df) to have one dataframe
+merged_table <- merge(df_summary, df, by = c("Station_ID", "sample._strata")) # in this file the syndiniales contributions within a host are in relative abundances.
+
+num_unique_samples <- length(unique(merged_table$Sample))
+print(num_unique_samples)
+
+```
+
+# Fig 1. Alveolata barplot
+```{r}
+library(forcats)
+
+# Data preparation 
+Alveolata <- filtered_relative %>%
+  subset_taxa(Division %in% c("Alveolata")) %>%
+  psmelt() %>%
+  mutate(
+    Sorted_genus = ifelse(is.na(Sorted_genus) | Sorted_genus == "NA", "Water", as.character(Sorted_genus)),
+    Abundance = ifelse(Abundance > 0, Abundance, 0),
+    Alveolata = ifelse(Division == "Alveolata", "Yes", "No")
+  ) %>%
+  group_by(Sample) %>%
+  mutate(RelativeAbundance = Abundance / sum(Abundance, na.rm = TRUE)) %>% # Calculate the relative abundances
+  filter(Sorted_genus == "Water") %>%
+  ungroup()
+
+# Get top 10 classes 
+top_classes <- Alveolata %>%
+  group_by(Class) %>%
+  summarise(total_abundance = sum(RelativeAbundance, na.rm = TRUE)) %>%
+  arrange(desc(total_abundance)) %>%
+  slice_head(n = 10) %>%
+  pull(Class)
+
+# Group other classes as "Other" 
+Alveolata <- Alveolata %>%
+  mutate(Class_grouped = ifelse(Class %in% top_classes, Class, "Other"))
+
+Alveolata$sample._strata <- factor(
+  Alveolata$sample._strata,
+  levels = c("Surface", "Medium", "Deep")   # Sample strata
+)
+
+#  Plot
+ggplot(data = Alveolata,
+       aes(x = Sample,
+           y = RelativeAbundance,
+           fill = Class_grouped)) +
+  geom_bar(stat = "identity") +
+  facet_grid(~ Filter_size + Station_ID + sample._strata  ,
+             scales = "free_x",
+             space = "free") +
+  labs(x = NULL,
+       y = "Relative abundance of Alveolata Classes") +
+  scale_y_continuous(breaks = seq(0, 1, 0.25)) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5),
+    legend.position = "right"
+  ) +
+  scale_fill_manual(values = c("Armophorea" = "moccasin",  
+                               "CONThreeP" = "lightblue",
+                               "Dinoflagellata_NA.Class" = "navy",
+                               "Dinophyceae" = "forestgreen",
+                               "Litostomatea" = "tomato",
+                               "Oligohymenophorea" = "pink",
+                               "Perkinsida" = "orange",
+                               "Prostomatea" = "#99CC33",
+                               "Spirotrichea" = "darkred",
+                               "Syndiniales" = "hotpink",
+                               "Other" = "grey"))
+
+
+```
+
+
+# Filtering the data
+```{r}
+df2 <- merged_table %>%
+  
+  unique() %>%   
+            
+  mutate(Taxa = ifelse(Class == "Syndiniales",                                  # I add a column called Taxa that if it is from the class syndinales
+                       as.character(Class),                                     # contains the name of the class (i.e, Syndinales)
+                       "Other"))                                                # otherwise it is called "Other"
+
+
+df2$Sorted_genus[is.na(df2$Sorted_genus)] <- "Water"
+```
+
+
+# ASV tables
+```{r}
+ASV_table <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Sorted_genus, Station_ID, Family) %>%                       #Change order to Family to get clade level
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = Family, values_from = nasv)
+
+ASV_table2 <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Order, Sorted_genus) %>% 
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = Sorted_genus, values_from = nasv)
+
+ASV_table3 <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Order) %>% 
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = Order, values_from = nasv)
+
+ASV_table4 <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Sorted_genus, Station_ID) %>% 
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = Sorted_genus, values_from = nasv)
+
+ASV_table5 <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Order, Station_ID) %>% 
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = Order, values_from = nasv)
+
+ASV_table6 <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Sorted_genus, Station_ID, Order) %>%                       #Change order to Family to get clade level
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = Order, values_from = nasv)
+
+ASV_Alveolata <- df2 %>% 
+  filter(Division == "Alveolata", Abundance > 0) %>%                            #This is to get the asv tables on the Alveolata inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Sorted_genus, Station_ID, Class) %>%                       
+  summarise(nasv = n_distinct(OTU)) %>% # sums up the number of distinct OTUs
+  pivot_wider(names_from = Class, values_from = nasv)
+
+```
+
+# Venn diagram dataframe preparations
+- Make the dataframe to make the Venn diagram of the ASVs of Syndiniales in the different locations/depths. 
+- Plot the diagrams with code provided in Venn_Diagram.Rmd
+- The data is provided in the file called "ASV_vennDiagram.csv"
+
+```{r}
+# creating a data frame with the different ASVs in between the locations
+ASV_venn <- df2 %>% 
+  filter(Taxa == "Syndiniales", Abundance > 0) %>%                                #This is to get the asv tables on the syndiniales inside each hots species in each location. Just remove the location variable to get the overall numbers
+  group_by(Sorted_genus, Station_ID, OTU) %>%                       #Change order to Family to get clade level
+  summarise(nasv = n_distinct(OTU)) %>% 
+  pivot_wider(names_from = OTU, values_from = nasv)
+
+# re name the "NA" with "Water"
+ASV_venn <- ASV_venn %>%
+  mutate(Sorted_genus = ifelse(is.na(Sorted_genus), "Water", Sorted_genus))
+
+# Keep only the water samples
+ASV_venn <- ASV_venn %>%
+  filter(Sorted_genus == "Water")
+
+# The venn diagram works with this file:
+write.csv(ASV_venn,"/Users/neea/Documents/Project SPORES/R scripts and tables/ASV_vennDiagram.csv")
+
+
+```
+# Filtering out the Syndiniales community
+- Adding the environmental parameters to the Syndiniales data
+
+
+```{r}
+
+
+syndiniales <- filtered_relative %>%                                                        
+  subset_taxa(Class %in% c("Syndiniales")) %>%                                  # <- I only keep Syndiniales
+  transform_sample_counts(function(x) x / sum(x)) %>% # This function counts the relative abundance
+  psmelt() %>% 
+  
+  mutate(Sorted_genus = ifelse(Sorted_genus ==  "NA",                           # Same but to replace NA by water
+                               "Water",
+                               as.character(Sorted_genus)), 
+
+         Abundance > 0) %>%
+  mutate(Syndiniales = ifelse(Class == "Syndiniales", "Yes", "no"))
+
+syndiniales$Sampling_date<-as.character(syndiniales$Sampling_date) 
+str(syndiniales)
+
+syndiniales$Sorted_genus[is.na(syndiniales$Sorted_genus)] <- "Water"
+
+# Create a dataframe with the syndiniales relative abundance and the environmental data
+syndiniales_data <- syndiniales %>%
+  filter(Class == "Syndiniales",
+         Abundance > 0)
+# Add the abiotic factors to the syndiniales_data
+
+syndiniales_data <- merge(df_summary, syndiniales_data, by = c("Station_ID", "sample._strata")) # in this file the average of each parameter is the average from each sampling strata. The syndiniales contributions within a host are in relative abundances.
+
+```
+# Fig. 3. Syndiniales clades
+```{r}
+
+M2 <- syndiniales %>%
+  filter(Sorted_genus == "Water")
+
+
+library(patchwork)
+# Filter out only the water samples from the microplankton filter
+
+M20 <- M2 %>%
+  filter(Sorted_genus == "Water",
+         Filter_size == "20")
+
+# Summarize total abundance per Family across all samples
+top_syndi_fam <- M20 %>%
+  group_by(Family) %>%
+  summarise(total_abundance = sum(Abundance, na.rm = TRUE)) %>%
+  arrange(desc(total_abundance)) %>%
+  slice_head(n = 10) %>%
+  pull(Family)
+
+syndiniales_data_topten20 <- M20 %>%
+  mutate(Family_grouped = ifelse(Family %in% top_syndi_fam, Family, "Other"))
+
+# Reorder factors
+syndiniales_data_topten20$sample._strata <- factor(syndiniales_data_topten20$sample._strata, levels = c("Surface", "Medium", "Deep"))
+syndiniales_data_topten20$Station_ID <- factor(syndiniales_data_topten20$Station_ID, levels = c("A17", "BY5", "BY15", "BY31"))
+
+p20 <- ggplot(data = syndiniales_data_topten20,
+       mapping = aes(x = Sample,
+                     y = Abundance,
+                     fill = Family_grouped)) +
+  geom_bar(stat = "identity") +
+  facet_grid(~ Station_ID + Sorted_genus + sample._strata,
+             scales = "free_x",
+             space = "free") +
+  labs(x = NULL,
+       y = "Proportion of Syndiniales groups") +
+  scale_y_continuous(breaks = seq(0 , 1, .25)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90,
+                                   vjust = 0.5)) +
+  labs(title = "Filter size 20, top 10 Syndiniales caldes")  +
+
+  scale_fill_manual(values = c("Dino-Group-I-Clade-1" = "moccasin",  
+                               "Dino-Group-I-Clade-3" = "lightblue",
+                               "Dino-Group-I-Clade-4" = "navy",
+                               "Dino-Group-I-Clade-8" = "forestgreen",
+                               "Dino-Group-II_NA.Family" = "tomato",
+                               "Dino-Group-II-Clade-3" = "pink",
+                               "Dino-Group-II-Clade-4" = "orange",
+                               "Dino-Group-II-Clade-5" = "#99CC33",
+                               "Dino-Group-III_X" = "darkred",
+                               "Dino-Group-IV-Hematodinium-Group" = "hotpink",
+                               "Other" = "grey"))
+
+# Filter out only the water samples from the pico-nano filter
+
+M02 <- M2 %>%
+  filter(Sorted_genus == "Water",
+         Filter_size == "0.2")
+
+# Summarize total abundance per Family across all samples
+top_syndi_fam <- M02 %>%
+  group_by(Family) %>%
+  summarise(total_abundance = sum(Abundance, na.rm = TRUE)) %>%
+  arrange(desc(total_abundance)) %>%
+  slice_head(n = 10) %>%
+  pull(Family)
+
+syndiniales_data_topten02 <- M02 %>%
+  mutate(Family_grouped = ifelse(Family %in% top_syndi_fam, Family, "Other"))
+
+# Reorder factors
+syndiniales_data_topten02$sample._strata <- factor(syndiniales_data_topten02$sample._strata, levels = c("Surface", "Medium", "Deep"))
+syndiniales_data_topten02$Station_ID <- factor(syndiniales_data_topten02$Station_ID, levels = c("A17", "BY5", "BY15", "BY31"))
+
+
+p02 <- ggplot(data = syndiniales_data_topten02,
+              mapping = aes(x = Sample,
+                            y = Abundance,
+                            fill = Family_grouped)) +
+  geom_bar(stat = "identity") +
+  facet_grid(~ Station_ID + Sorted_genus + sample._strata,
+             scales = "free_x",
+             space = "free") +
+  labs(x = NULL,
+       y = "Proportion of Syndiniales groups") +
+  scale_y_continuous(breaks = seq(0 , 1, .25)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90,
+                                   vjust = 0.5)) +
+  labs(title = "Filter size 0.2, top 10 Syndiniales caldes") +
+  scale_fill_manual(values = c("Dino-Group-I-Clade-1" = "moccasin",  
+                               "Dino-Group-I-Clade-3" = "lightblue",
+                               "Dino-Group-I-Clade-4" = "navy",
+                               "Dino-Group-II_NA.Family" = "tomato",
+                               "Dino-Group-II-Clade-1" = "blue",
+                               "Dino-Group-II-Clade-26" = "#FF9696",
+                               "Dino-Group-II-Clade-32" = "#CC9900",
+                               "Dino-Group-II-Clade-5" = "#99CC33",
+                               "Dino-Group-III_X" = "darkred",
+                               "Dino-Group-IV-Hematodinium-Group" = "hotpink",
+                               "Other" = "grey"))
+
+
+
+
+(p20 + p02) +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+
+```
+# Fig. S3. SGs in the different size fractions
+- Filter out only the water samples and the Alveolata and Syndiniales in them
+
+```{r}
+M <- syndiniales_data 
+Water <- M %>% # All water samples combined
+  filter(Sorted_genus == "Water")
+
+# Change the filter size to be a character
+M$Filter_size<-as.character(M$Filter_size)
+
+Water02 <- M %>%
+  filter(Sorted_genus != "Temora",
+         Sorted_genus != "Centropages",
+         Sorted_genus != "Pseudocalanus",
+         Sorted_genus != "Acartia",
+         Sorted_genus != "Calanus",
+         Sorted_genus != "Eurytemora",
+         Filter_size != "20")
+
+Water20 <- M %>%
+  filter(Sorted_genus != "Temora",
+         Sorted_genus != "Centropages",
+         Sorted_genus != "Pseudocalanus",
+         Sorted_genus != "Acartia",
+         Sorted_genus != "Calanus",
+         Sorted_genus != "Eurytemora",
+         Filter_size != "0.2")
+
+
+ggplot(data = Water02, #Change the dataframe acoordingly to which filter size you want to plot
+       mapping = aes(x = Sample,
+                     y = Abundance,
+                     fill = Order)) +
+  geom_bar(stat = "identity") +
+  facet_grid(~  sample._strata + Station_ID,
+             scales = "free_x",
+             space = "free") +
+  labs(x = NULL,
+       y = "Proportion of Syndiniales groups") +
+  scale_y_continuous(breaks = seq(0 , 1, .25)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90,
+                                   vjust = 0.5)) +
+  scale_fill_manual(values = c("Dino-Group-I" = "#99CC99",  
+                               "Dino-Group-II" = "#6699FF",
+                               "Dino-Group-III" = "#330066",
+                               "Dino-Group-IV" = "#FF6699",
+                               "Dino-Group-V" = "#FF9966"))
+```
+
+# Fig. 4.Pres/abs heatmap
+
+-Plotting a heat map of the presence/absence of the falimies at all the depths, locations and filter sizes
+
+
+
+```{r}
+# Keeping only the columns we want to include
+coo1 <- M2[ , c("Sample", "Abundance", "Filter_size", "Family", "Station_ID", "sample._strata")]
+
+coo2 <- coo1 %>%
+  mutate(PresenceAbsence = ifelse(Abundance > 0 , 1, 0)) # If the abundance is more than 0, the OTU is present (1), otherwise it is 0
+
+# Step 1: Relabel numeric filter sizes
+coo2 <- coo2 %>%
+  mutate(Filter_size = case_when(
+    Filter_size == 0.2 ~ "Small",
+    Filter_size == 20.0 ~ "Large",
+    TRUE ~ as.character(Filter_size)  # fallback
+  ))
+
+
+library(dplyr)
+
+# Make sure your presence column is 1 (present) or 0 (absent)
+presence_summary <- coo2 %>%
+  filter(PresenceAbsence == 1) %>%
+  group_by(Station_ID, sample._strata, Family) %>%
+  summarize(
+    filters_present = paste(sort(unique(Filter_size)), collapse = "_"),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    status = case_when(
+      filters_present == "Large_Small" ~ "Both",
+      filters_present == "Large" ~ "Large only",
+      filters_present == "Small" ~ "Small only",
+      TRUE ~ "Unknown"
+    )
+  )
+
+
+# Get all unique combinations of Location, Depth, Taxa_family
+all_combinations <- expand.grid(
+  Station_ID = unique(presence_summary$Station_ID),
+  sample._strata = unique(presence_summary$sample._strata),
+  Family = unique(presence_summary$Family)
+)
+
+# Join with summary
+presence_complete <- all_combinations %>%
+  left_join(presence_summary, by = c("Station_ID", "sample._strata", "Family")) %>%
+  mutate(status = replace_na(status, "Not detected"))
+
+
+# Reorder factors
+presence_complete$sample._strata <- factor(presence_complete$sample._strata, levels = c("Surface", "Medium", "Deep"))
+presence_complete$Station_ID <- factor(presence_complete$Station_ID, levels = c("A17", "BY5", "BY15", "BY31"))
+
+# Plot it
+
+ggplot(presence_complete, aes(x = sample._strata, y = Family, fill = status)) +
+  geom_tile(color = "white") +
+  facet_grid(~Station_ID) +
+  scale_fill_manual(values = c(
+    "Both" = "hotpink",
+    "Small only" = "steelblue",
+    "Large only" = "darkred",
+    "Not detected" = "grey90"
+  )) +
+  labs(
+    title = "Shared and Unique Taxa Families by Location, Depth, and Filter Size",
+    fill = "Presence Status",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 180, hjust = 1),
+    axis.text.y = element_text(size = 12),      #  make y-axis labels larger
+    axis.title.y.right = element_text(size = 14), # control right y-axis title if used
+    axis.title.y = element_blank(),              #  hide left title
+    axis.ticks.y.right = element_line(),         #draw right-side ticks
+    axis.text.y.right = element_text(size = 12), #text size on right side
+    axis.text.y.left = element_blank()           # remove left-side labels
+  ) +
+  scale_y_discrete(position = "right")           # move y-axis to the right
+
+
+
+```
+# Fig. S4. PCoA + envfit
+- Run the PCOA for the Syndiniales Clades. syndiniales_data includes only samples that have syndiniales reads in them. THIS FOR ALL THE SIZE FRACTIONS TOGETHER!
+- PERMANOVA for the PCoA FOR BOTH FILTERS
+
+```{r}
+# Transform the df from long to wide
+PCOA_wide <- syndiniales_data %>%        
+  select(Sample, Abundance, sample._strata, Sample_type, Filter_size, Sorted_genus, Family, Station_ID, Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate) %>%
+  filter(Sample_type != "Zooplankton") %>%
+  group_by(Sample, sample._strata, Filter_size, Sorted_genus, Family, Station_ID, Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate) %>%
+  summarise(Abundance = sum(Abundance)) %>%
+  spread(Family, Abundance) %>%
+  as.data.frame()
+
+str(PCOA_wide)
+PCOA_wide %>% View()
+
+# Only keep numeric values and transform into a matrix
+PCOA_mat <- PCOA_wide[,12:56] %>% as.matrix()
+
+# Change NA values to 0
+PCOA_mat[is.na(PCOA_mat)] <- 0
+
+# Set seed for reproducibility
+set.seed(1)
+library(vegan)
+
+# Remove empty rows (rows with all zeros)
+non_empty_rows <- rowSums(PCOA_mat) > 0  # Identify which rows to keep
+PCOA_mat <- PCOA_mat[non_empty_rows, ]   # Filter matrix
+
+# Apply the same filtering to PCOA_wide to match the matrix
+PCOA_wide_filtered <- PCOA_wide[non_empty_rows, ]
+
+# Create a distance matrix (e.g., Bray-Curtis dissimilarity)
+diss_matrix <- vegdist(PCOA_mat, method = "bray")
+plot(diss_matrix)
+
+
+# Perform Principal Coordinate Analysis (PCoA)
+pcoa_result <- cmdscale(diss_matrix, k = 2, eig = TRUE)
+
+# Extract coordinates and eigenvalues
+pcoa_scores <- as.data.frame(pcoa_result$points)
+eigenvalues <- pcoa_result$eig  # Extract eigenvalues
+
+# Calculate percentage of variation explained
+variation_explained <- eigenvalues / sum(eigenvalues) * 100
+
+# Now, add metadata **from the filtered version of PCOA_wide**
+
+pcoa_scores$Sample_type <- PCOA_wide_filtered$Sample_type
+pcoa_scores$sample_strata <- PCOA_wide_filtered$sample._strata
+pcoa_scores$Location <- PCOA_wide_filtered$Station_ID
+pcoa_scores$Filter_size <- PCOA_wide_filtered$Filter_size
+
+pcoa_scores <- pcoa_scores %>%
+  mutate(Filter_size = as.character(Filter_size)) %>%
+  mutate(Filter_size = case_when(
+    Filter_size %in% c("20", "20.0") ~ "Large",
+    Filter_size %in% c("0.2", "0.20") ~ "Small",
+    TRUE ~ "Other"
+  ))
+
+# Check if row numbers match
+print(nrow(pcoa_scores))          # Should match
+print(nrow(PCOA_wide_filtered))   # Should match
+
+# OPTIONAL: Print the variation explained for each axis
+print(paste0("Variation explained by PCoA1: ", round(variation_explained[1], 2), "%"))
+print(paste0("Variation explained by PCoA2: ", round(variation_explained[2], 2), "%"))
+
+
+# Plot the PCoA results
+ggplot(pcoa_scores, aes(x = V1, y = V2)) +
+  geom_point(mapping = aes(shape = Filter_size, col = Location), size=3) +
+  scale_color_manual(values=c("hotpink", "slateblue4", "seagreen4", "lightblue", "peru")) +
+  #geom_text(vjust = 1.5, hjust = 1.5) +
+  labs(title = "Principal Coordinate Analysis (PCoA)", x = "PCoA 1", y = "PCoA 2") +
+  #geom_label(data = df_species,
+  #                    mapping = aes(x= NMDS1, y =NMDS2, label= species)) #+
+  theme_classic()
+
+
+################################################################################
+
+# addinf the envfit
+
+# Extract environmental variables (make sure they match filtered PCoA data)
+env_data2 <- PCOA_wide_filtered %>%
+  select(Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate)
+
+# Run envfit using PCoA coordinates and environmental data
+env_fit <- envfit(pcoa_result$points, env_data2, perm = 999, na.rm = TRUE)
+
+# Print results to check significance
+print(env_fit)
+
+# Convert envfit results to a dataframe for plotting
+env_scores <- as.data.frame(scores(env_fit, display = "vectors"))
+env_scores$variable <- rownames(env_scores)  # Add variable names
+
+
+## ggplot it in a faceted way
+
+# Plot the PCoA results
+ggplot(pcoa_scores, aes(x = V1, y = V2)) +
+  geom_point(mapping = aes(shape = Filter_size, col = Location), size=3) +
+  scale_color_manual(values=c("slateblue4","hotpink", "seagreen4", "lightblue", "peru")) +
+
+  geom_segment(data = env_scores, aes(x = 0, y = 0, xend = Dim1, yend = Dim2), 
+               arrow = arrow(length = unit(0.3, "cm")), color = "black") +
+  geom_text(data = env_scores, aes(x = Dim1, y = Dim2, label = variable), 
+            vjust = 1.5, hjust = 1.5, color = "black") +
+  labs(
+    x = paste0("PCoA1 (", round(variation_explained[1], 2), "%)"),
+    y = paste0("PCoA2 (", round(variation_explained[2], 2), "%)"),
+    title = "PCoA Plot with Variation Explained"
+  )  +                #If I want to have the dino groups showing in the plot
+
+  coord_fixed()+
+  theme_classic() 
+
+
+
+
+# Permanova for the pcoa
+
+
+P<-adonis2(PCOA_mat ~ Filter_size, data = PCOA_wide_filtered)
+#This shows the anova table
+
+P<-adonis2(PCOA_mat ~ Station_ID + sample._strata + Filter_size, data = PCOA_wide_filtered)
+
+P
+
+
+```
+# Fig. 5. PCoA + envfit
+
+- PCoA For the two different filter sizes separately
+- PERMANOVA
+
+```{r}
+##### pico-nano #####
+# Transform the df from long to wide
+PCOA_wide <- syndiniales_data %>%        
+  select(Sample, Abundance, sample._strata, Sample_type, Filter_size, Sorted_genus, Family, Station_ID, Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate) %>%
+  filter(Sample_type != "Zooplankton") %>%
+  filter(Filter_size == "0.2") %>%
+  group_by(Sample, sample._strata, Filter_size, Sorted_genus, Family, Station_ID, Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate) %>%
+  summarise(Abundance = sum(Abundance)) %>%
+  spread(Family, Abundance) %>%
+  as.data.frame()
+
+##### microplankton #####
+# Transform the df from long to wide
+PCOA_wide <- syndiniales_data %>%        
+  select(Sample, Abundance, sample._strata, Sample_type, Filter_size, Sorted_genus, Family, Station_ID, Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate) %>%
+  filter(Sample_type != "Zooplankton") %>%
+  filter(Filter_size != "0.2") %>%
+  group_by(Sample, sample._strata, Filter_size, Sorted_genus, Family, Station_ID, Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate) %>%
+  summarise(Abundance = sum(Abundance)) %>%
+  spread(Family, Abundance) %>%
+  as.data.frame()
+
+str(PCOA_wide)
+PCOA_wide %>% View()
+
+# Only keep numeric values and transform into a matrix (Check the correct number of rows based on the filter size you are working with)
+PCOA_mat <- PCOA_wide[,12:53] %>% as.matrix() # 39 for microplankton, 53 for pico-nano
+
+# Change NA values to 0
+PCOA_mat[is.na(PCOA_mat)] <- 0
+
+# Set seed for reproducibility
+set.seed(1)
+library(vegan)
+
+# Remove empty rows (rows with all zeros)
+non_empty_rows <- rowSums(PCOA_mat) > 0  # Identify which rows to keep
+PCOA_mat <- PCOA_mat[non_empty_rows, ]   # Filter matrix
+
+# Apply the same filtering to PCOA_wide to match the matrix
+PCOA_wide_filtered <- PCOA_wide[non_empty_rows, ]
+
+# Create a distance matrix (e.g., Bray-Curtis dissimilarity)
+diss_matrix <- vegdist(PCOA_mat, method = "bray")
+plot(diss_matrix)
+
+
+# Perform Principal Coordinate Analysis (PCoA)
+pcoa_result <- cmdscale(diss_matrix, k = 2, eig = TRUE)
+
+# Extract coordinates and eigenvalues
+pcoa_scores <- as.data.frame(pcoa_result$points)
+eigenvalues <- pcoa_result$eig  # Extract eigenvalues
+
+# Calculate percentage of variation explained
+variation_explained <- eigenvalues / sum(eigenvalues) * 100
+
+# Now, add metadata from the filtered version of PCOA_wide
+
+pcoa_scores$Sample_type <- PCOA_wide_filtered$Sample_type
+pcoa_scores$sample_strata <- PCOA_wide_filtered$sample._strata
+pcoa_scores$Location <- PCOA_wide_filtered$Station_ID
+pcoa_scores$Filter_size <- PCOA_wide_filtered$Filter_size
+
+pcoa_scores <- pcoa_scores %>%
+  mutate(Filter_size = as.character(Filter_size)) %>%
+  mutate(Filter_size = case_when(
+    Filter_size %in% c("20", "20.0") ~ "Large",
+    Filter_size %in% c("0.2", "0.20") ~ "Small",
+    TRUE ~ "Other"
+  ))
+
+
+# Print the variation explained for each axis
+print(paste0("Variation explained by PCoA1: ", round(variation_explained[1], 2), "%"))
+print(paste0("Variation explained by PCoA2: ", round(variation_explained[2], 2), "%"))
+
+
+# Plot the PCoA results
+ggplot(pcoa_scores, aes(x = V1, y = V2)) +
+  geom_point(mapping = aes(shape = sample_strata, col = Filter_size), size=3) +
+  scale_color_manual(values=c("hotpink", "slateblue4", "seagreen4", "lightblue", "peru")) +
+  #geom_text(vjust = 1.5, hjust = 1.5) +
+  labs(title = "Principal Coordinate Analysis (PCoA)", x = "PCoA 1", y = "PCoA 2") +
+  #geom_label(data = df_species,
+  #                    mapping = aes(x= NMDS1, y =NMDS2, label= species)) #+
+  theme_classic()
+
+####### Add the Envfit ######
+
+# Extract environmental variables (make sure they match filtered PCoA data)
+env_data2 <- PCOA_wide_filtered %>%
+  select(Avg_Salinity, Avg_Oxygen, Avg_Temperature, Avg_Chlorophyll, Avg_Nitrate, Avg_Phosphate)
+
+# Run envfit using PCoA coordinates and environmental data
+env_fit <- envfit(pcoa_result$points, env_data2, perm = 999, na.rm = TRUE)
+
+# Print results to check significance
+print(env_fit)
+
+# Convert envfit results to a dataframe for plotting
+env_scores <- as.data.frame(scores(env_fit, display = "vectors"))
+env_scores$variable <- rownames(env_scores)  # Add variable names
+
+
+## ggplot it in a faceted way
+
+# Plot the PCoA results
+ggplot(pcoa_scores, aes(x = V1, y = V2)) +
+  geom_point(mapping = aes(shape = sample_strata, col = Filter_size), size=3) +
+  scale_color_manual(values=c("hotpink", "slateblue4", "seagreen4", "lightblue", "peru")) +
+
+  geom_segment(data = env_scores, aes(x = 0, y = 0, xend = Dim1, yend = Dim2), 
+               arrow = arrow(length = unit(0.3, "cm")), color = "black") +
+  geom_text(data = env_scores, aes(x = Dim1, y = Dim2, label = variable), 
+            vjust = 1.5, hjust = 1.5, color = "black") +
+  labs(
+    x = paste0("PCoA1 (", round(variation_explained[1], 2), "%)"),
+    y = paste0("PCoA2 (", round(variation_explained[2], 2), "%)"),
+    title = "PCoA Plot with Variation Explained"
+  )  +                #If I want to have the dino groups showing in the plot
+
+  coord_fixed()+
+  theme_classic() 
+
+
+
+
+# Permanova for the pcoa
+
+
+P<-adonis2(PCOA_mat ~ Filter_size, data = PCOA_wide_filtered)
+#This shows the anova table
+
+P<-adonis2(PCOA_mat ~ Station_ID + sample._strata + Filter_size, data = PCOA_wide_filtered)
+
+P
+
+```
+# Fig. S1. Sampling map
+
+```{r}
+#!/bin/Rscript -l
+# Kinlan M.G. Jan                                                     12.11.2024
+# Map - Create the sampling map
+# ---------------------------------------------------------------------------- #
+# Download shapefile data from ICES:
+# https://gis.ices.dk/geonetwork/srv/eng/catalog.search#/metadata/c784a0a3-752f-4b50-b02f-f225f6c815eb
+# ---------------------------------------------------------------------------- #
+setwd("/Users/neea/Documents/Project_1/Data") 
+library(tidyverse) ; packageVersion("tidyverse")                      # v. 2.0.0
+install.packages("sf")
+library(sf) ; packageVersion("sf")                                   # v. 1.0.16
+# ---------------------------------------------------------------------------- #
+# Get the coordinates from your dataset ----------------------------------------
+coordinates <-
+  data.frame(Station = c("BY31", "BY5", "BY15",  "A17"),
+             Basin = c("BY31", "BY5", "BY15", "A17"),
+             Longitude.dec = c(18.23683,15.98533, 20.07892, 10.50717),
+             Latitude.dec = c(58.59383,55.25017, 57.31282, 58.28475))
+## Transform to sf object ------------------------------------------------------
+coord_sf <- st_as_sf(coordinates, 
+                     coords = c("Longitude.dec", "Latitude.dec"),
+                     crs = 4326)
+# Load the shapefile dataset and filter only the Baltic Sea ------------------ #
+sf <-
+  read_sf("/Users/neea/Documents/Project_1/Data/ICES_areas/ICES_Areas_20160601_cut_dense_3857.shp") |> # <--- here is the data downloaded on ICES, change to your path
+  filter(SubDivisio %in% as.character(20:32)) |> 
+  group_by(SubArea) |> 
+  summarise()
+# ---------------------------------------------------------------------------- #
+# Plot -------------------------------------------------------------------------
+# Plot the sampling station in the Baltic Sea -------------------------------- #
+ggplot() +
+  # Start with the Baltic Sea silhouette
+  geom_sf(data = sf,
+          fill = "transparent",
+          color = "black") +
+  # Then add the station as point
+  geom_sf(data = coord_sf,
+          mapping = aes(fill = Basin),
+          shape = 21, size = 5, stroke = 1) +
+  scale_fill_manual(values = c("#e5771e", "#ffecb4", "pink", "#75c8ae")) +
+  #geom_sf_text(mapping = aes(label = SubDivisio)) +
+  theme_void() +
+  theme(panel.background = element_rect(fill = "white", color = NA),
+        axis.text = element_text(color="black"),
+        panel.grid.major = element_line(color = "grey90"))
+```
+
+
+# Fig. S5. Host associations
+```{r}
+
+Alveolata <- filtered_relative %>%                                                        
+  subset_taxa(Division %in% c("Alveolata")) %>%                                  # <- I only keep Alveolata
+  psmelt() %>% 
+  
+  mutate(Sorted_genus = ifelse(Sorted_genus ==  "NA",                           # Same but to replace NA by water
+                               "Water",
+                               as.character(Sorted_genus)), 
+         
+         Abundance > 0) %>%
+  mutate(Alveolata = ifelse(Division == "Alveolata", "Yes", "no"))
+
+Alveolata$Sorted_genus[is.na(Alveolata$Sorted_genus)] <- "Water"
+
+Alveolata <- Alveolata%>%
+  group_by(Sample) %>%                              # Group by each sample
+  mutate(RelativeAbundance = Abundance / sum(Abundance)) %>% # Compute relative abundance
+  ungroup()
+
+
+#Plot the Alveolata community inside the hosts
+alv2 <- Alveolata %>%
+  filter(Sorted_genus != "Water",)
+
+other_groups <- setdiff(unique(alv2$Order), 
+                        c("Dino-Group-I", "Dino-Group-II", "Dino-Group-III", "Dino-Group-IV", "Dino-Group-V", "Apostomatia",
+                          "Peritrichia_2",
+                          "Gonyaulacales",
+                          "Dinoflagellata_NA.Class_NA.Order",
+                          "Prostomatea_X",
+                          "Gymnodiniales",
+                          "Dinophysiales",
+                          "Choreotrichida",
+                          "Perkinsida_X")) # Appointing the other groups
+
+view(other_groups)
+
+alv2$Order <- factor(alv2$Order, 
+                     levels = c(other_groups, "Apostomatia",
+                                "Peritrichia_2",
+                                "Gonyaulacales",
+                                "Dinoflagellata_NA.Class_NA.Order",
+                                "Prostomatea_X",
+                                "Gymnodiniales",
+                                "Dinophysiales",
+                                "Choreotrichida",
+                                "Perkinsida_X", "Dino-Group-I", "Dino-Group-II", "Dino-Group-III", "Dino-Group-IV", "Dino-Group-V")) # telling the order of the plotting of the groups
+
+
+ggplot(data = alv2,                                             
+       mapping = aes(x = Sample,
+                     y = RelativeAbundance,
+                     fill = Order)) +
+  geom_bar(stat = "identity") +
+  facet_grid(.~ Station_ID + Sorted_genus,        
+             scales = "free_x",
+             space = "free") +
+  labs(x = NULL,
+       y = "Proportion of Syndiniales groups within Alveolata") +
+  scale_y_continuous(breaks = seq(0 , 1, .25)) +
+  
+  # Apply classic theme and adjust x-axis text orientation
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90,
+                                   vjust = 0.5)) +
+  
+  # Define custom colors for the Dino groups
+  scale_fill_manual(values = c("Dino-Group-I" = "#99CC99",  
+                               "Dino-Group-II" = "#6699FF",
+                               "Dino-Group-III" = "#330066",
+                              "Dino-Group-IV" = "#FF6699",
+                               "Dino-Group-V" = "#FFCC96",
+                               "Apostomatia" = "darkred",
+                               "Peritrichia_2" = "skyblue",
+                               "Gonyaulacales" ="violet",
+                               "Dinoflagellata_NA.Class_NA.Order" = "forestgreen",
+                               "Prostomatea_X" = "beige",
+                               other_groups = "grey"))
+```
+
+# Fig. S6. Vertical prophiles
+- plot the abiotic parameters into vetrical prophiles. Use the actual values, not averages calculated above (df = "abiotic")
+
+```{r}
+ # Plot the parameters in vertical prophile plots
+  ggplot(abiotic %>% arrange(Station_ID, Depth),
+         aes(x = Salinity, y = Depth, color = Station_ID)) + #Change the parameter you want to plot (Salinity, Oxygen, Temperature ect...)
+    geom_path() +
+    geom_point(size = 2) +
+    scale_y_reverse(limits = c(90, 0), breaks = seq(0, 90, by = 10)) +
+    labs(
+      y = "Depth (m)",
+      x = "Value",
+      title = "Vertical Profiles of Environmental Parameters",
+      color = "Parameter"
+    ) +
+    scale_color_brewer(palette = "Dark2") +
+    theme_bw(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      strip.text = element_text(face = "bold", size = 12),
+      legend.position = "bottom",
+      panel.grid.minor = element_blank()
+    )
+```
