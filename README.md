@@ -4,7 +4,8 @@ Environmental gradients and host availability shape the distribution of dinospor
 This repository includes the datasets and the code to reproduce the analysis and the figures for the scientific research paper "Environmental gradients and host availability shape the distribution of dinosporetic Syndiniales in the Baltic Sea–Skagerrak ecosystem"
 
 
-The code provided is in an RMarkdown format and is annotated throughout for each step. The input data files are Excel, RDS or CSV files to match the code provided. The Environmental data includes the variables measured at the same location and time as the zooplankton samples were collected from.
+The code provided is in an RMarkdown format and is annotated throughout for each step. The input data files are Excel (Abiotic_spore), RDS (ps_DinoSpore) or CSV (ASV_vennDiagram) files to match the code provided. The Environmental data includes the variables measured at the same location and time as the zooplankton samples were collected from.
+
 
 The datasets contain annotated DNA sequences of zooplankton and water samples. The dataframe has the following columns:
 OTU: DNA sequence identified by Illumina sequencing and DADA2. 
