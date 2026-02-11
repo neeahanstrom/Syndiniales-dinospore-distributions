@@ -1,4 +1,4 @@
-# Environmental gradients and host availability shape the distribution of dinosporetic Syndiniales in the Baltic Sea–Skagerrak ecosystem
+# Environmental gradients and host availability shape the distribution of Syndiniales dinospores in the Baltic Sea–Skagerrak ecosystem
 
 Syndiniales-dinospore-distributions
 
