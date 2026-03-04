@@ -652,7 +652,7 @@ ggplot(presence_complete, aes(x = sample._strata, y = Family, fill = status)) +
 ```
 # Fig. S4. PCoA + envfit
 - Run the PCOA for the Syndiniales Clades. syndiniales_data includes only samples that have syndiniales reads in them. THIS FOR ALL THE SIZE FRACTIONS TOGETHER!
-- PERMANOVA for the PCoA FOR BOTH FILTERS
+- PERMANOVA FOR BOTH FILTERS
 
 ```{r}
 # Transform the df from long to wide
@@ -776,15 +776,17 @@ ggplot(pcoa_scores, aes(x = V1, y = V2)) +
 
 
 
-# Permanova for the pcoa
+# Permanova for the bray
 
+P <- adonis2(diss_matrix ~ Station_ID + sample._strata + Filter_size,
+             data = PCOA_wide_filtered,
+             permutations = 999,
+             by = "margin")
 
-P<-adonis2(PCOA_mat ~ Filter_size, data = PCOA_wide_filtered)
-#This shows the anova table
-
-P<-adonis2(PCOA_mat ~ Station_ID + sample._strata + Filter_size, data = PCOA_wide_filtered)
+# print the results table
 
 P
+
 
 
 ```
@@ -922,15 +924,17 @@ ggplot(pcoa_scores, aes(x = V1, y = V2)) +
 
 
 
-# Permanova for the pcoa
+# Permanova for the bray
 
+P <- adonis2(diss_matrix ~ Station_ID + sample._strata + Filter_size,
+             data = PCOA_wide_filtered,
+             permutations = 999,
+             by = "margin")
 
-P<-adonis2(PCOA_mat ~ Filter_size, data = PCOA_wide_filtered)
-#This shows the anova table
-
-P<-adonis2(PCOA_mat ~ Station_ID + sample._strata + Filter_size, data = PCOA_wide_filtered)
+# print the results table
 
 P
+
 
 ```
 # Fig. S1. Sampling map
