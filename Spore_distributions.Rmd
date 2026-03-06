@@ -43,12 +43,12 @@ print(total_reads)
 ```
 # Fig. S2: Rarefaction curves
 
-- Remove the crustacean reads from the phyloseq object and get the read counts of the taxa included in this study
+- Remove all but Alveolata reads from the phyloseq object and get the read counts of the taxa included in this study
 - Plot the rarefaction curves
 
 ```{r}
 keep <- ps_spores %>%                                                        
-  subset_taxa(Order != "Crustacea") # <- removes the crustacean reads
+  subset_taxa(Division == "Alveolata") # <- Keeping only the Alveolata reads
 
 
 # Remove samples with read count less than 100. 
@@ -83,10 +83,10 @@ sample_data_df <- as.data.frame(sample_data(filtered_relative))
 
 
 ```
-# Get the reads of Syndiniales in the water and in the host samples
-- Only the Syndiniales reads per sample type
+# Get the reads of Alveolata in the water and in the host samples
+
 ```{r}
-physeq_subset <- subset_taxa(filtered_relative, Class == "Syndiniales") ### You can change the taxonomic level and the name of the taxa of interest accordingly here
+physeq_subset <- subset_taxa(filtered_relative, Division == "Alveolata") ### You can change the taxonomic level and the name of the taxa of interest accordingly here
 
 # Put it into a data frame
 sample_data_df <- as.data.frame(sample_data(physeq_subset))
@@ -106,7 +106,7 @@ reads_by_sample_type <- sample_data_df %>%
   group_by(Sample_type) %>%
   summarise(Total_Reads = sum(Total_Reads))
 
-####Print the total reads of SYNDINIALES in water and in the hosts
+####Print the total reads of ALveolata in water and in the hosts
 print(reads_by_sample_type)
 ```
 # Use the df we create here to merge the abiotic and botic tables together in one data frame
