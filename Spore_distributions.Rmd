@@ -971,21 +971,20 @@ sf <-
 # ---------------------------------------------------------------------------- #
 # Plot -------------------------------------------------------------------------
 # Plot the sampling station in the Baltic Sea -------------------------------- #
-ggplot() +
-  # Start with the Baltic Sea silhouette
-  geom_sf(data = sf,
-          fill = "transparent",
-          color = "black") +
-  # Then add the station as point
-  geom_sf(data = coord_sf,
-          mapping = aes(fill = Basin),
-          shape = 21, size = 5, stroke = 1) +
-  scale_fill_manual(values = c("lightblue","hotpink", "seagreen4", "slateblue4")) +
-  #geom_sf_text(mapping = aes(label = SubDivisio)) +
-  theme_void() +
-  theme(panel.background = element_rect(fill = "white", color = NA),
-        axis.text = element_text(color="black"),
-        panel.grid.major = element_line(color = "grey90"))
+
+  ggplot() +
+    # Baltic Sea silhouette
+    geom_sf(data = sf,
+            fill = "transparent",
+            color = "black") +
+    # Labels directly on the map
+    geom_sf_text(data = coord_sf,
+                 aes(label = Basin),
+                 size = 4) +
+    theme_void() +
+    theme(panel.background = element_rect(fill = "white", color = NA),
+          axis.text = element_text(color="black"),
+          panel.grid.major = element_line(color = "grey90"))
 ```
 
 
