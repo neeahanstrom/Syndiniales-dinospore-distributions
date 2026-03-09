@@ -1,4 +1,4 @@
-# Distributions of Syndiniales size-class community compositions show variation across environmental gradients
+# Environmental gradients shape the distribution of free-living and host-associated Syndiniales life stages 
 
 Syndiniales-dinospore-distributions
 
