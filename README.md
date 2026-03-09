@@ -2,7 +2,7 @@
 
 Syndiniales-dinospore-distributions
 
-This repository includes the datasets and the code to reproduce the analysis and the figures for the scientific research paper "Distributions of Syndiniales size-class community compositions show variation across environmental gradients"
+This repository includes the datasets and the code to reproduce the analysis and the figures for the scientific research paper "Environmental gradients shape the distribution of free-living and host-associated Syndiniales life stages "
 
 
 The code provided is in an RMarkdown format and is annotated throughout for each step. The input data files are Excel (Abiotic_spore), RDS (ps_DinoSpore) or CSV (ASV_vennDiagram) files to match the code provided. The Environmental data includes the variables measured at the same location and time as the zooplankton samples were collected from.
