@@ -1,5 +1,5 @@
 ---
-title: "Environmental gradients and host availability shape the distribution of dinosporetic Syndiniales in the Baltic Sea–Skagerrak ecosystems"
+title: "Environmental gradients shape the distribution of free-living and host-associated Syndiniales life stages"
 output: html_document
 date: "2026-01-28"
 Author: Neea Hanström
